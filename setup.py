@@ -1,12 +1,15 @@
 #!/usr/bin/env python
+
 from setuptools import setup
 
 setup(
     name="sqlsession",
     version="0.1",
-    description='',
+    description='Dirt simple CRUD API to access SQL databases',
     author='Peter Facka',
-    author_email='pfacka@hexcells.com',
+    url='https://bitbucket.org/trackingwire/sqlsession',
+    author_email='pfacka@trackingwire.com',
+    license='MIT Licence (http://opensource.org/licenses/MIT)',
     packages=[
         'sqlsession',
     ],
@@ -17,4 +20,14 @@ setup(
     ],
     provides=['sqlsession (0.1)'],
     include_package_data=True,
+    classifiers=[
+      'Development Status :: 3 - Alpha',
+      'Environment :: Web Environment',
+      'Intended Audience :: Developers',
+      'Operating System :: Microsoft :: Windows',
+      'Operating System :: MacOS :: MacOS X',
+      'Operating System :: POSIX',
+      'Programming Language :: Python :: 2.7',
+      'License :: OSI Approved :: MIT License',
+      ],
 )

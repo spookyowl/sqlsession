@@ -6,6 +6,7 @@ from sqlalchemy import and_
 from sqlalchemy.exc import IntegrityError
 
 
+
 def create_engine(params):
 
     def get_value(data, keys, default=None):
@@ -80,6 +81,11 @@ def build_condition_from_dict(table, dict_condition):
 
     for key,value in dict_condition.items():
         column = getattr(table.columns, key)
+        try:
+            value = column.type.python_type(value)
+        except:
+            raise ValueError("Cant convert %s (%s) to %s" (value, type(value), column.type))
+
         condition.append(column == value)
 
     return and_(*condition)
@@ -96,7 +102,9 @@ class SqlSessionTooMany(Exception):
 class SqlSession(object):
 
     def __init__(self, param = None):
-
+        
+        self.column_names = None
+        
         def init(p):
             self.engine = create_engine(p)
             self.metadata = sqlalchemy.MetaData(self.engine)
@@ -118,9 +126,19 @@ class SqlSession(object):
     def __exit__(self, type, value, traceback):
         self.session.close()
 
-    def get_table(self, table_name):
-        return Table(table_name, self.metadata, autoload=True,
-                     autoload_with=self.session.get_bind())
+    def get_table(self, schema_table_name):
+        t = schema_table_name.split('.')
+        
+        if len(t) == 1:
+            table_name = t
+            return Table(table_name, self.metadata, autoload=True,
+                         autoload_with=self.session.get_bind())
+
+        elif len(t) == 2:
+            schema_name, table_name = t
+            return Table(table_name, self.metadata, autoload=True,
+                         autoload_with=self.session.get_bind(),
+                         schema=schema_name)
 
     def update(self, table, data, condition=None):
 
@@ -176,12 +194,14 @@ class SqlSession(object):
 
         if isinstance(condition, dict):
             condition = build_condition_from_dict(table, condition)
+    
+        if condition is not None:
+            stmt = stmt.where(condition)
 
-        stmt = stmt.where(condition)
         return self.one(stmt)
 
     def fetch_all(self, table, condition=None):
-        
+        print 'RRR'
         if isinstance(table, str):
             table = self.get_table(table)
 
@@ -190,11 +210,14 @@ class SqlSession(object):
         if isinstance(condition, dict):
             condition = build_condition_from_dict(table, condition)
 
-        stmt = stmt.where(condition)
+        if condition is not None:
+            stmt = stmt.where(condition)
+
         return self.all(stmt)
 
     def one(self, statement):
         data = self.session.execute(statement)
+        self.column_names = data.keys()
         data = map(dict, data)
 
         if len(data) > 1:
@@ -206,7 +229,10 @@ class SqlSession(object):
         return data[0]
 
     def all(self, statement):
+        print '!!!', statement
+        return statement
         data = self.session.execute(statement)
+        self.column_names = data.keys()
         return map(dict, data)
 
     def drop_table(table):
