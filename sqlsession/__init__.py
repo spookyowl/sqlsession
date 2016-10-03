@@ -234,7 +234,6 @@ class SqlSession(object):
         data = self.session.execute(statement)
         self.column_names = data.keys()
         result = imap(dict, data)
-        data.close()
         return result
 
     def drop_table(table):
