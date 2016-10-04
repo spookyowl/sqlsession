@@ -1,4 +1,5 @@
 import sqlalchemy
+import sqlalchemy.engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.schema import Table
 from sqlalchemy.sql.expression import insert, select, update, delete
@@ -102,10 +103,10 @@ class SqlSession(object):
         self.column_names = None
         
         if isinstance(param, dict):
-            self.engine = create_engine(p)
+            self.engine = create_engine(param)
             self.metadata = sqlalchemy.MetaData(self.engine)
 
-        else if isinstance(param, sqlalchemy.Engine)
+        elif isinstance(param, sqlalchemy.engine.Engine):
             self.engine = engine
             self.metadata = sqlalchemy.MetaData(self.engine)
 
