@@ -43,7 +43,9 @@ def create_engine(params):
     else:
         raise ValueError('db_type must be eighter "mysql" or "pgsql"')
 
-    return sqlalchemy.create_engine(url)
+    engine = sqlalchemy.create_engine(url)
+    engine.update_execution_options(execution_options={'stream_results': True})
+    return engine
  
    
 def preprocess_table_data(table, data):
@@ -94,18 +96,18 @@ class SqlSessionTooMany(Exception):
 
 
 class SqlSession(object):
-
+    
     def __init__(self, param = None):
         
         self.column_names = None
         
-        def init(p):
-            self.engine = create_engine(p)
-            self.engine.update_execution_options(execution_options={'stream_results': True})
-            self.metadata = sqlalchemy.MetaData(self.engine)
-      
         if isinstance(param, dict):
-            init(param)
+            self.engine = create_engine(p)
+            self.metadata = sqlalchemy.MetaData(self.engine)
+
+        else if isinstance(param, sqlalchemy.Engine)
+            self.engine = engine
+            self.metadata = sqlalchemy.MetaData(self.engine)
 
         else:
             raise ValueError("No parameters to initialize Session")
