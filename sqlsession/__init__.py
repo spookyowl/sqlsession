@@ -101,25 +101,24 @@ class SqlSession(object):
         
         def init(p):
             self.engine = create_engine(p)
+            self.engine.update_execution_options(execution_options={'stream_results': True})
             self.metadata = sqlalchemy.MetaData(self.engine)
-            self.session_cls = sessionmaker(bind=self.engine)
       
         if isinstance(param, dict):
             init(param)
-
-        elif param is not None:
-            self.session_cls = param
 
         else:
             raise ValueError("No parameters to initialize Session")
 
     def __enter__(self):
-        self.session = self.session_cls()
+        self.connection = self.engine.connect()
         return self
 
     def __exit__(self, type, value, traceback):
-        self.session.expunge_all()
-        self.session.close()
+        self.connection.close()
+
+    def get_unbound_connection(self):
+        return self.engine.contextual_connect(close_with_result=True).execution_options(stream_results=True)
 
     def get_table(self, schema_table_name):
         t = schema_table_name.split('.')
@@ -127,12 +126,12 @@ class SqlSession(object):
         if len(t) == 1:
             table_name = t[0]
             return Table(table_name, self.metadata, autoload=True,
-                         autoload_with=self.session.get_bind())
+                         autoload_with=self.engine)
 
         elif len(t) == 2:
             schema_name, table_name = t
             return Table(table_name, self.metadata, autoload=True,
-                         autoload_with=self.session.get_bind(),
+                         autoload_with=self.engine,
                          schema=schema_name)
 
         else:
@@ -151,7 +150,7 @@ class SqlSession(object):
 
         data = preprocess_table_data(table, data)
         stmt = update(table).where(condition).values(data[0])
-        return self.session.execute(stmt)
+        return self.connection.execute(stmt)
 
     def insert(self, table, data):
 
@@ -160,7 +159,7 @@ class SqlSession(object):
 
         data = preprocess_table_data(table, data)       
         stmt = insert(table, data)
-        return self.session.execute(stmt)
+        return self.connection.execute(stmt)
 
     def delete(self, table, condition=None):
         if isinstance(table, str):
@@ -176,13 +175,13 @@ class SqlSession(object):
         else:
             return 
 
-        return self.session.execute(stmt)
+        return self.connection.execute(stmt)
 
     def execute(self, statement):
-        return self.session.execute(statement)
+        return self.connection.execute(statement)
 
     def commit(self):
-        return self.session.commit()
+        return self.connection.commit()
 
     def get_statement(self, table, condition):
         
@@ -218,7 +217,7 @@ class SqlSession(object):
         return self.all(stmt)
 
     def one(self, statement):
-        data = self.session.execute(statement)
+        data = self.connection.execute(statement)
         self.column_names = data.keys()
         data = map(dict, data)
 
@@ -231,7 +230,7 @@ class SqlSession(object):
         return data[0]
 
     def all(self, statement):
-        data = self.session.execute(statement)
+        data = self.get_unbound_connection().execute(statement)
         self.column_names = data.keys()
         result = imap(dict, data)
         return result
