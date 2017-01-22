@@ -1,3 +1,4 @@
+import re
 import sqlalchemy
 import sqlalchemy.engine
 from sqlalchemy.orm import sessionmaker
@@ -101,13 +102,14 @@ class SqlSession(object):
     def __init__(self, param = None):
         
         self.column_names = None
+        self.transaction = None
         
         if isinstance(param, dict):
             self.engine = create_engine(param)
             self.metadata = sqlalchemy.MetaData(self.engine)
 
         elif isinstance(param, sqlalchemy.engine.Engine):
-            self.engine = engine
+            self.engine = param
             self.metadata = sqlalchemy.MetaData(self.engine)
 
         else:
@@ -118,7 +120,26 @@ class SqlSession(object):
         return self
 
     def __exit__(self, type, value, traceback):
+        if self.transaction is not None:
+            self.transaction.commit()
+            self.transaction = None
+
         self.connection.close()
+
+    def begin(self):
+        self.transaction = self.connection.begin()
+
+    def end(self):
+        if self.transaction is not None:
+            self.transaction.commit()
+            self.transaction.close()
+            self.transaction = None
+
+    def rollback(self):
+        if self.transaction is not None:
+            self.transaction.rollback()
+            self.transaction.close()
+            self.transaction = None
 
     def get_unbound_connection(self):
         return self.engine.contextual_connect(close_with_result=True).execution_options(stream_results=True)
@@ -165,20 +186,17 @@ class SqlSession(object):
         return self.connection.execute(stmt)
 
     def delete(self, table, condition=None):
+
         if isinstance(table, str):
             table = self.get_table(table)
 
-        if condition is not None:
-            stmt = delete(table_name).where(condition)
-
-        elif isinstance(condition, dict):
+        if isinstance(condition, dict):
             condition = build_condition_from_dict(table, condition)
-            stmt = delete(table_name).where(condition)
+            stmt = delete(table).where(condition)
+            self.connection.execute(stmt)
 
-        else:
-            return 
-
-        return self.connection.execute(stmt)
+    def truncate(self, table):
+        raise RuntimeError('Not yet inmplement')
 
     def execute(self, statement):
         return self.connection.execute(statement)
@@ -243,3 +261,31 @@ class SqlSession(object):
             table = self.get_table(table)
             
         table.drop()
+
+    def add_user(self, user_name):
+        if not re.match('[a-zA-Z0-9]*', user_name):
+            raise ValueError('User name can contain only letters and numbers')
+
+        self.connection.execute('CREATE USER %s' % user_name)
+
+    def add_group(self, group_name):
+        if not re.match('[a-zA-Z0-9]*', group_name):
+            raise ValueError('Group name can contain only letters and numbers')
+
+        self.connection.execute('CREATE GROUP %s' % group_name)
+
+    def add_user_to_group(user_name, group_name):
+        if not re.match('[a-zA-Z0-9]*', user_name):
+            raise ValueError('User name can contain only letters and numbers')
+
+        if not re.match('[a-zA-Z0-9]*', group_name):
+            raise ValueError('Group name can contain only letters and numbers')
+
+        self.connection.execute('ALTER GROUP %s ADD USER %s' % group_name)
+
+    def drop_user(self, user_name):
+        if not re.match('[a-zA-Z0-9]*', user_name):
+            raise ValueError('User name can contain only letters and numbers')
+
+        self.connection.execute('DROP USER %s' % user_name)
+
