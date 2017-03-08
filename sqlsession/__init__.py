@@ -8,6 +8,8 @@ from sqlalchemy import and_
 from sqlalchemy.exc import IntegrityError
 from itertools import imap
 
+#TODO: LazySession !!!
+
 def create_engine(params):
 
     def get_value(data, keys, default=None):
@@ -89,6 +91,38 @@ def build_condition_from_dict(table, dict_condition):
     return and_(*condition)
 
 
+def build_order_from_list(table, order_list):
+    
+    def get_column(key, direction):
+
+        if direction is not None and direction not in ('desc', 'asc'):
+            raise ValueError("Order direction must be 'desc' or 'asc'")
+
+        if direction == 'desc':
+            return getattr(table.columns, key).desc()
+
+        else:
+            return getattr(table.columns, key)
+
+    def interpret_column(column):
+
+        if isinstance(order_list, tuple):
+            return get_column(order_list[1], order_list[0])
+
+        if isinstance(order_list, str) or isinstance(order_list, unicode):
+            return get_column(order_list, 'asc')
+
+        else:
+            raise ValueError('Can not interpret order statement. Use list of strings or tuples.')
+
+    if isinstance(order_list, list):
+        return list(map(interpret_column, order_list))
+
+    else:
+        return [interpret_column(order_list)]
+
+
+
 class SqlSessionNotFound(Exception):
     pass
 
@@ -99,10 +133,11 @@ class SqlSessionTooMany(Exception):
 
 class SqlSession(object):
     
-    def __init__(self, param = None):
+    def __init__(self, param = None, as_role=None):
         
         self.column_names = None
         self.transaction = None
+        self.as_role = as_role
         
         if isinstance(param, dict):
             self.engine = create_engine(param)
@@ -117,6 +152,10 @@ class SqlSession(object):
 
     def __enter__(self):
         self.connection = self.engine.connect()
+
+        if self.as_role is not None:
+            self.set_role(self.as_role)
+
         return self
 
     def __exit__(self, type, value, traceback):
@@ -204,7 +243,7 @@ class SqlSession(object):
     def commit(self):
         return self.connection.commit()
 
-    def get_statement(self, table, condition):
+    def get_statement(self, table, condition, order):
         
         if isinstance(table, str) or isinstance(table, unicode):
             table = self.get_table(table)
@@ -216,6 +255,9 @@ class SqlSession(object):
 
         if condition is not None:
             stmt = stmt.where(condition)
+
+        if order is not None:
+            stmt = stmt.order_by(*build_order_from_list(table, order))
 
         return stmt
 
@@ -233,8 +275,8 @@ class SqlSession(object):
 
         return self.one(stmt)
 
-    def fetch_all(self, table, condition=None):
-        stmt = self.get_statement(table, condition)
+    def fetch_all(self, table, condition=None, order=None):
+        stmt = self.get_statement(table, condition, order)
         return self.all(stmt)
 
     def one(self, statement):
@@ -288,4 +330,10 @@ class SqlSession(object):
             raise ValueError('User name can contain only letters and numbers')
 
         self.connection.execute('DROP USER %s' % user_name)
+
+    def set_role(self, user_name):
+        if not re.match('[a-zA-Z0-9]*', user_name):
+            raise ValueError('User name can contain only letters and numbers')
+
+        self.connection.execute('SET role=%s' % user_name)
 
