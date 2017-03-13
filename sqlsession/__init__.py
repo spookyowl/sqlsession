@@ -6,7 +6,17 @@ from sqlalchemy.schema import Table
 from sqlalchemy.sql.expression import insert, select, update, delete
 from sqlalchemy import and_
 from sqlalchemy.exc import IntegrityError
-from itertools import imap
+
+try:
+    import itertools.imap as map
+except ImportError:
+    pass
+
+try:
+    text = unicode
+except NameError:
+    text = str 
+
 
 #TODO: LazySession !!!
 
@@ -61,7 +71,7 @@ def preprocess_table_data(table, data):
         result = {}
         for column in table.columns:
             key = column.name
-            value = item.get(unicode(key))
+            value = item.get(text(key))
 
             if value is not None:
                 result[key] = value
@@ -221,7 +231,7 @@ class SqlSession(object):
             table = self.get_table(table)
 
         data = preprocess_table_data(table, data)       
-        stmt = insert(table, data)
+        stmt = insert(table, list(data))
         return self.connection.execute(stmt)
 
     def delete(self, table, condition=None):
@@ -282,7 +292,7 @@ class SqlSession(object):
     def one(self, statement):
         data = self.connection.execute(statement)
         self.column_names = data.keys()
-        data = map(dict, data)
+        data = list(map(dict, data))
 
         if len(data) > 1:
             raise SqlSessionTooMany("Expected exaclty one record, %s found" % len(data))
@@ -295,7 +305,7 @@ class SqlSession(object):
     def all(self, statement):
         data = self.get_unbound_connection().execute(statement)
         self.column_names = data.keys()
-        result = imap(dict, data)
+        result = map(dict, data)
         return result
 
     def drop_table(table):
