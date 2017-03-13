@@ -4,7 +4,7 @@ from setuptools import setup
 
 setup(
     name="sqlsession",
-    version="0.1.8",
+    version="0.1.9",
     description='Dirt simple CRUD API to access SQL databases',
     author='Peter Facka',
     url='https://bitbucket.org/trackingwire/sqlsession',
@@ -18,7 +18,7 @@ setup(
         'SQLAlchemy>=1.0.6',
         'psycopg2>=2.6.1'
     ],
-    provides=['sqlsession (0.1.8)'],
+    provides=['sqlsession (0.1.9)'],
     include_package_data=True,
     classifiers=[
       'Development Status :: 3 - Alpha',
