@@ -78,7 +78,7 @@ def preprocess_table_data(table, data):
 
         return result
 
-    return map(convert, data)
+    return list(map(convert, data))
 
 
 def build_pkey_condition(table, data):
