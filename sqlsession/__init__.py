@@ -20,19 +20,20 @@ except NameError:
 
 #TODO: LazySession !!!
 
+def get_value(data, keys, default=None):
+    result = None
+
+    for k in keys:
+        result = data.get(k)
+        
+        if result is not None:
+            return result
+
+    if result is None:
+        return default
+
+
 def create_engine(params):
-
-    def get_value(data, keys, default=None):
-        result = None
-
-        for k in keys:
-            result = data.get(k)
-            
-            if result is not None:
-                return result
-
-        if result is None:
-            return default
 
     db_type = get_value(params, ['type', 'db_type'], 'pgsql')
 
@@ -57,7 +58,7 @@ def create_engine(params):
     else:
         raise ValueError('db_type must be eighter "mysql" or "pgsql"')
 
-    engine = sqlalchemy.create_engine(url)
+    engine = sqlalchemy.create_engine(url, implicit_returning=True)
     engine.update_execution_options(execution_options={'stream_results': True})
     return engine
  
@@ -148,6 +149,7 @@ class SqlSession(object):
         self.column_names = None
         self.transaction = None
         self.as_role = as_role
+        self.database_type = 'pgsql'
         
         if isinstance(param, dict):
             self.engine = create_engine(param)
@@ -231,7 +233,7 @@ class SqlSession(object):
             table = self.get_table(table)
 
         data = preprocess_table_data(table, data)       
-        stmt = insert(table, list(data))
+        stmt = insert(table, list(data), returning=table.primary_key.columns)
         return self.connection.execute(stmt)
 
     def delete(self, table, condition=None):
