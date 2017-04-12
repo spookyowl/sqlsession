@@ -18,7 +18,10 @@ except NameError:
     text = str 
 
 
-#TODO: LazySession !!!
+#TODO: Lazy session !!!
+#NOTE: Lazy sessions are problematic. potentionaly require log running connections
+# with open cursor blocking reloads of tables. Solution: timeouts client/server side
+# caching, throtling
 
 def get_value(data, keys, default=None):
     result = None
@@ -59,7 +62,7 @@ def create_engine(params):
         raise ValueError('db_type must be eighter "mysql" or "pgsql"')
 
     engine = sqlalchemy.create_engine(url, implicit_returning=True)
-    engine.update_execution_options(execution_options={'stream_results': True})
+    #engine.update_execution_options(execution_options={'stream_results': True})
     return engine
  
    
@@ -305,9 +308,9 @@ class SqlSession(object):
         return data[0]
 
     def all(self, statement):
-        data = self.get_unbound_connection().execute(statement)
+        data = self.connection.execute(statement)
         self.column_names = data.keys()
-        result = map(dict, data)
+        result = list(map(dict, data))
         return result
 
     def drop_table(table):
