@@ -331,20 +331,35 @@ class SqlSession(object):
 
         self.connection.execute('CREATE GROUP %s' % group_name)
 
-    def add_user_to_group(user_name, group_name):
+    def add_user_to_group(self, user_name, group_name):
         if not re.match('[a-zA-Z0-9]*', user_name):
             raise ValueError('User name can contain only letters and numbers')
 
         if not re.match('[a-zA-Z0-9]*', group_name):
             raise ValueError('Group name can contain only letters and numbers')
 
-        self.connection.execute('ALTER GROUP %s ADD USER %s' % group_name)
+        self.connection.execute('ALTER GROUP %s ADD USER %s' % (group_name, user_name))
+
+    def drop_user_from_group(self, user_name, group_name):
+        if not re.match('[a-zA-Z0-9]*', user_name):
+            raise ValueError('User name can contain only letters and numbers')
+
+        if not re.match('[a-zA-Z0-9]*', group_name):
+            raise ValueError('Group name can contain only letters and numbers')
+
+        self.connection.execute('ALTER GROUP %s DROP USER %s' % (group_name, user_name))
 
     def drop_user(self, user_name):
         if not re.match('[a-zA-Z0-9]*', user_name):
             raise ValueError('User name can contain only letters and numbers')
 
         self.connection.execute('DROP USER %s' % user_name)
+
+    def drop_group(self, group_name):
+        if not re.match('[a-zA-Z0-9]*', group_name):
+            raise ValueError('User name can contain only letters and numbers')
+
+        self.connection.execute('DROP GROUP %s' % group_name)
 
     def set_role(self, user_name):
         if not re.match('[a-zA-Z0-9]*', user_name):
