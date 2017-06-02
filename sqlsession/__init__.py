@@ -4,6 +4,7 @@ import sqlalchemy.engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.schema import Table
 from sqlalchemy.sql.expression import insert, select, update, delete
+from sqlalchemy.sql.expression import text as text_statement
 from sqlalchemy import and_
 from sqlalchemy.exc import IntegrityError
 
@@ -195,8 +196,27 @@ class SqlSession(object):
             self.transaction.close()
             self.transaction = None
 
+    def execute(self, statement):
+        statement = text_statement(statement)
+
+        if self.transaction is not None:
+            return self.connection.execute(statement)
+        else:
+            
+            return self.connection.execute(statement.execution_options(autocommit=True))
+
+    def commit(self):
+        if self.transaction is not None:
+            self.transaction.commit()
+            self.transaction = None
+        else:
+            self.connection.execute('commit;')
+
     def get_unbound_connection(self):
         return self.engine.contextual_connect(close_with_result=True).execution_options(stream_results=True)
+
+    def enable_notify_logging(self, realtime=False):
+        pass
 
     def get_table(self, schema_table_name):
         t = schema_table_name.split('.')
@@ -251,12 +271,6 @@ class SqlSession(object):
 
     def truncate(self, table):
         raise RuntimeError('Not yet inmplement')
-
-    def execute(self, statement):
-        return self.connection.execute(statement)
-
-    def commit(self):
-        return self.connection.commit()
 
     def get_statement(self, table, condition, order):
         
@@ -319,6 +333,14 @@ class SqlSession(object):
             
         table.drop()
 
+    def get_current_timestamp(self):
+        statement = text_statement('SELECT current_timestamp;')
+        return self.one(statement)      
+
+    def get_local_timestamp(self):
+        statement = text_statement('SELECT localtimestamp;')
+        return self.one(statement)      
+
     def add_user(self, user_name):
         if not re.match('[a-zA-Z0-9]*', user_name):
             raise ValueError('User name can contain only letters and numbers')
@@ -330,6 +352,26 @@ class SqlSession(object):
             raise ValueError('Group name can contain only letters and numbers')
 
         self.connection.execute('CREATE GROUP %s' % group_name)
+
+    def rename_user(self, old_user_name, new_user_name):
+
+        if not re.match('[a-zA-Z0-9]*', old_user_name):
+            raise ValueError('Old user name can contain only letters and numbers')
+
+        if not re.match('[a-zA-Z0-9]*', new_user_name):
+            raise ValueError('New user name can contain only letters and numbers')
+
+        self.connection.execute('ALTER USER %s RENAME TO %s;' % (old_user_name, new_user_name))
+
+    def rename_group(self, old_group_name, new_group_name):
+
+        if not re.match('[a-zA-Z0-9]*', old_group_name):
+            raise ValueError('Old group name can contain only letters and numbers')
+
+        if not re.match('[a-zA-Z0-9]*', new_group_name):
+            raise ValueError('New group name can contain only letters and numbers')
+
+        self.connection.execute('ALTER GROUP %s RENAME TO %s;' % (old_group_name, new_group_name))
 
     def add_user_to_group(self, user_name, group_name):
         if not re.match('[a-zA-Z0-9]*', user_name):
@@ -366,4 +408,3 @@ class SqlSession(object):
             raise ValueError('User name can contain only letters and numbers')
 
         self.connection.execute('SET role=%s' % user_name)
-
