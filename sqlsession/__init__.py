@@ -334,12 +334,12 @@ class SqlSession(object):
         table.drop()
 
     def get_current_timestamp(self):
-        statement = text_statement('SELECT current_timestamp;')
-        return self.one(statement)      
+        statement = text_statement('SELECT current_timestamp AS now;')
+        return self.one(statement)['now']
 
     def get_local_timestamp(self):
-        statement = text_statement('SELECT localtimestamp;')
-        return self.one(statement)      
+        statement = text_statement('SELECT localtimestamp AS now;')
+        return self.one(statement)['now']
 
     def add_user(self, user_name):
         if not re.match('[a-zA-Z0-9]*', user_name):
