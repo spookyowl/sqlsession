@@ -7,6 +7,7 @@ from sqlalchemy.sql.expression import insert, select, update, delete
 from sqlalchemy.sql.expression import text as text_statement
 from sqlalchemy import and_
 from sqlalchemy.exc import IntegrityError
+import urllib
 
 try:
     import itertools.imap as map
@@ -16,7 +17,7 @@ except ImportError:
 try:
     text = unicode
 except NameError:
-    text = str 
+    text = str
 
 
 #TODO: Lazy session !!!
@@ -29,7 +30,7 @@ def get_value(data, keys, default=None):
 
     for k in keys:
         result = data.get(k)
-        
+
         if result is not None:
             return result
 
@@ -40,6 +41,7 @@ def get_value(data, keys, default=None):
 def create_engine(params):
 
     db_type = get_value(params, ['type', 'db_type'], 'pgsql')
+    default_port = None
 
     if db_type == 'mysql':
         default_port = 3306
@@ -47,26 +49,34 @@ def create_engine(params):
     elif db_type == 'pgsql':
         default_port = 5432
 
+    elif db_type == 'mssql':
+        default_port = 1433
+
     ctx = (get_value(params, ['user']),
            get_value(params, ['passwd', 'password', 'pass']),
            get_value(params, ['host', 'server'], 'localhost'),
            get_value(params, ['port'], default_port),
            get_value(params, ['database', 'db_name', 'database_name', 'db']))
 
+    #TODO: harmonize, use quoting
     if db_type == 'pgsql':
         url = 'postgresql+psycopg2://%s:%s@%s:%s/%s' % ctx
 
     elif db_type == 'mysql':
         url = 'mysql+mysqldb://%s:%s@%s:%s/%s' % ctx
 
+    elif db_type == 'mssql':
+        url = 'mssql+pyodbc://%s:%s@%s:%s/%s?driver=SQLServer13' % ctx
+
+
     else:
-        raise ValueError('db_type must be eighter "mysql" or "pgsql"')
+        raise ValueError('db_type must be eighter "mysql"/"pgsql"/"mssql"')
 
     engine = sqlalchemy.create_engine(url, implicit_returning=True)
     #engine.update_execution_options(execution_options={'stream_results': True})
     return engine
- 
-   
+
+
 def preprocess_table_data(table, data):
 
     if isinstance(data, dict):
@@ -97,7 +107,7 @@ def build_pkey_condition(table, data):
 
 
 def build_condition_from_dict(table, dict_condition):
-    condition = []    
+    condition = []
 
     for key,value in dict_condition.items():
         column = getattr(table.columns, key)
@@ -107,7 +117,7 @@ def build_condition_from_dict(table, dict_condition):
 
 
 def build_order_from_list(table, order_list):
-    
+
     def get_column(key, direction):
 
         if direction is not None and direction not in ('desc', 'asc'):
@@ -147,14 +157,14 @@ class SqlSessionTooMany(Exception):
 
 
 class SqlSession(object):
-    
+
     def __init__(self, param = None, as_role=None):
-        
+
         self.column_names = None
         self.transaction = None
         self.as_role = as_role
         self.database_type = 'pgsql'
-        
+
         if isinstance(param, dict):
             self.engine = create_engine(param)
             self.metadata = sqlalchemy.MetaData(self.engine)
@@ -202,7 +212,7 @@ class SqlSession(object):
         if self.transaction is not None:
             return self.connection.execute(statement)
         else:
-            
+
             return self.connection.execute(statement.execution_options(autocommit=True))
 
     def commit(self):
@@ -220,7 +230,7 @@ class SqlSession(object):
 
     def get_table(self, schema_table_name):
         t = schema_table_name.split('.')
-        
+
         if len(t) == 1:
             table_name = t[0]
             return Table(table_name, self.metadata, autoload=True,
@@ -255,7 +265,7 @@ class SqlSession(object):
         if isinstance(table, str):
             table = self.get_table(table)
 
-        data = preprocess_table_data(table, data)       
+        data = preprocess_table_data(table, data)
         stmt = insert(table, list(data), returning=table.primary_key.columns)
         return self.connection.execute(stmt)
 
@@ -273,7 +283,7 @@ class SqlSession(object):
         raise RuntimeError('Not yet inmplement')
 
     def get_statement(self, table, condition, order):
-        
+
         if isinstance(table, str) or isinstance(table, unicode):
             table = self.get_table(table)
 
@@ -298,7 +308,7 @@ class SqlSession(object):
 
         if isinstance(condition, dict):
             condition = build_condition_from_dict(table, condition)
-    
+
         if condition is not None:
             stmt = stmt.where(condition)
 
@@ -330,7 +340,7 @@ class SqlSession(object):
     def drop_table(table):
         if isinstance(table, str):
             table = self.get_table(table)
-            
+
         table.drop()
 
     def get_current_timestamp(self):
