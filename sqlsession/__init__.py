@@ -63,7 +63,6 @@ def create_engine(params):
         raise ValueError('db_type must be eighter "mysql" or "pgsql"')
 
     engine = sqlalchemy.create_engine(url, implicit_returning=True)
-    #engine.update_execution_options(execution_options={'stream_results': True})
     return engine
  
    
@@ -197,13 +196,21 @@ class SqlSession(object):
             self.transaction = None
 
     def execute(self, statement):
-        statement = text_statement(statement)
 
         if self.transaction is not None:
             return self.connection.execute(statement)
         else:
-            
-            return self.connection.execute(statement.execution_options(autocommit=True))
+            autocomit = self.connection._execution_options.get('autocommit', False)
+
+            if not autocomit:
+                self.connection.execution_options(autocommit=True)
+
+            result = self.connection.execute(statement)
+
+            if not autocomit:
+                self.connection.execution_options(autocommit=False)
+
+            return result
 
     def commit(self):
         if self.transaction is not None:
@@ -248,7 +255,7 @@ class SqlSession(object):
 
         data = preprocess_table_data(table, data)
         stmt = update(table).where(condition).values(data[0])
-        return self.connection.execute(stmt)
+        return self.execute(stmt)
 
     def insert(self, table, data):
 
@@ -257,7 +264,7 @@ class SqlSession(object):
 
         data = preprocess_table_data(table, data)       
         stmt = insert(table, list(data), returning=table.primary_key.columns)
-        return self.connection.execute(stmt)
+        return self.execute(stmt)
 
     def delete(self, table, condition=None):
 
@@ -267,7 +274,7 @@ class SqlSession(object):
         if isinstance(condition, dict):
             condition = build_condition_from_dict(table, condition)
             stmt = delete(table).where(condition)
-            self.connection.execute(stmt)
+            self.execute(stmt)
 
     def truncate(self, table):
         raise RuntimeError('Not yet inmplement')
@@ -309,7 +316,7 @@ class SqlSession(object):
         return self.all(stmt)
 
     def one(self, statement):
-        data = self.connection.execute(statement)
+        data = self.execute(statement)
         self.column_names = data.keys()
         data = list(map(dict, data))
 
@@ -322,7 +329,7 @@ class SqlSession(object):
         return data[0]
 
     def all(self, statement):
-        data = self.connection.execute(statement)
+        data = self.execute(statement)
         self.column_names = data.keys()
         result = list(map(dict, data))
         return result
@@ -334,24 +341,24 @@ class SqlSession(object):
         table.drop()
 
     def get_current_timestamp(self):
-        statement = text_statement('SELECT current_timestamp AS now;')
+        statement = 'SELECT current_timestamp AS now;'
         return self.one(statement)['now']
 
     def get_local_timestamp(self):
-        statement = text_statement('SELECT localtimestamp AS now;')
+        statement = 'SELECT localtimestamp AS now;'
         return self.one(statement)['now']
 
     def add_user(self, user_name):
         if not re.match('[a-zA-Z0-9]*', user_name):
             raise ValueError('User name can contain only letters and numbers')
 
-        self.connection.execute('CREATE USER %s' % user_name)
+        self.execute('CREATE USER %s' % user_name)
 
     def add_group(self, group_name):
         if not re.match('[a-zA-Z0-9]*', group_name):
             raise ValueError('Group name can contain only letters and numbers')
 
-        self.connection.execute('CREATE GROUP %s' % group_name)
+        self.execute('CREATE GROUP %s' % group_name)
 
     def rename_user(self, old_user_name, new_user_name):
 
@@ -361,7 +368,7 @@ class SqlSession(object):
         if not re.match('[a-zA-Z0-9]*', new_user_name):
             raise ValueError('New user name can contain only letters and numbers')
 
-        self.connection.execute('ALTER USER %s RENAME TO %s;' % (old_user_name, new_user_name))
+        self.execute('ALTER USER %s RENAME TO %s;' % (old_user_name, new_user_name))
 
     def rename_group(self, old_group_name, new_group_name):
 
@@ -371,7 +378,7 @@ class SqlSession(object):
         if not re.match('[a-zA-Z0-9]*', new_group_name):
             raise ValueError('New group name can contain only letters and numbers')
 
-        self.connection.execute('ALTER GROUP %s RENAME TO %s;' % (old_group_name, new_group_name))
+        self.execute('ALTER GROUP %s RENAME TO %s;' % (old_group_name, new_group_name))
 
     def add_user_to_group(self, user_name, group_name):
         if not re.match('[a-zA-Z0-9]*', user_name):
@@ -380,7 +387,7 @@ class SqlSession(object):
         if not re.match('[a-zA-Z0-9]*', group_name):
             raise ValueError('Group name can contain only letters and numbers')
 
-        self.connection.execute('ALTER GROUP %s ADD USER %s' % (group_name, user_name))
+        self.execute('ALTER GROUP %s ADD USER %s' % (group_name, user_name))
 
     def drop_user_from_group(self, user_name, group_name):
         if not re.match('[a-zA-Z0-9]*', user_name):
@@ -389,22 +396,22 @@ class SqlSession(object):
         if not re.match('[a-zA-Z0-9]*', group_name):
             raise ValueError('Group name can contain only letters and numbers')
 
-        self.connection.execute('ALTER GROUP %s DROP USER %s' % (group_name, user_name))
+        self.execute('ALTER GROUP %s DROP USER %s' % (group_name, user_name))
 
     def drop_user(self, user_name):
         if not re.match('[a-zA-Z0-9]*', user_name):
             raise ValueError('User name can contain only letters and numbers')
 
-        self.connection.execute('DROP USER %s' % user_name)
+        self.execute('DROP USER %s' % user_name)
 
     def drop_group(self, group_name):
         if not re.match('[a-zA-Z0-9]*', group_name):
             raise ValueError('User name can contain only letters and numbers')
 
-        self.connection.execute('DROP GROUP %s' % group_name)
+        self.execute('DROP GROUP %s' % group_name)
 
     def set_role(self, user_name):
         if not re.match('[a-zA-Z0-9]*', user_name):
             raise ValueError('User name can contain only letters and numbers')
 
-        self.connection.execute('SET role=%s' % user_name)
+        self.execute('SET role=%s' % user_name)
