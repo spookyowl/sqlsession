@@ -4,10 +4,10 @@ from setuptools import setup
 
 setup(
     name="sqlsession",
-    version="0.1.18",
+    version="0.1.19",
     description='Dirt simple CRUD API to access SQL databases',
     author='Peter Facka',
-    url='https://bitbucket.org/trackingwire/sqlsession',
+    url='https://github.com/spookyowl/sqlsession',
     author_email='pfacka@trackingwire.com',
     license='MIT Licence (http://opensource.org/licenses/MIT)',
     packages=[
