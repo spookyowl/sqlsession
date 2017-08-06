@@ -155,6 +155,26 @@ class SqlSessionTooMany(Exception):
     pass
 
 
+class NoticeCollector(object):
+
+    def __init__(self):
+        self.buf = []
+        self.callback = None
+
+    def append(self, message):
+        message = message.rstrip()
+
+        if self.callback is not None:
+            self.callback(message)
+
+        self.buf.append(message)
+        if len(self.buf) > 50:
+            self.buf.pop(0)
+
+    def __iter__(self):
+        return iter(self.buf)
+
+
 class SqlSession(object):
 
     def __init__(self, param = None, as_role=None):
@@ -177,6 +197,9 @@ class SqlSession(object):
 
     def __enter__(self):
         self.connection = self.engine.connect()
+
+        if self.database_type == 'pgsql':
+            self.connection.connection.connection.notices = NoticeCollector()
 
         if self.as_role is not None:
             self.set_role(self.as_role)
@@ -209,6 +232,7 @@ class SqlSession(object):
 
         if self.transaction is not None:
             return self.connection.execute(statement)
+
         else:
             autocomit = self.connection._execution_options.get('autocommit', False)
 
@@ -232,8 +256,6 @@ class SqlSession(object):
     def get_unbound_connection(self):
         return self.engine.contextual_connect(close_with_result=True).execution_options(stream_results=True)
 
-    def enable_notify_logging(self, realtime=False):
-        pass
 
     def get_table(self, schema_table_name):
         t = schema_table_name.split('.')
@@ -357,6 +379,10 @@ class SqlSession(object):
     def get_local_timestamp(self):
         statement = 'SELECT localtimestamp AS now;'
         return self.one(statement)['now']
+
+    def set_log_callback(self, callback):
+        if self.database_type == 'pgsql':
+            self.connection.connection.connection.notices.callback = callback
 
     def add_user(self, user_name):
         if not re.match('[a-zA-Z0-9]*', user_name):
