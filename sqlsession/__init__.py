@@ -177,7 +177,6 @@ class SqlSession(object):
 
     def __enter__(self):
         self.connection = self.engine.connect()
-
         if self.as_role is not None:
             self.set_role(self.as_role)
 
@@ -210,16 +209,8 @@ class SqlSession(object):
         if self.transaction is not None:
             return self.connection.execute(statement)
         else:
-            autocomit = self.connection._execution_options.get('autocommit', False)
-
-            if not autocomit:
-                self.connection.execution_options(autocommit=True)
-
             result = self.connection.execute(statement)
-
-            if not autocomit:
-                self.connection.execution_options(autocommit=False)
-
+            self.connection.execute('commit;')
             return result
 
     def commit(self):
@@ -326,7 +317,7 @@ class SqlSession(object):
         return self.all(stmt)
 
     def one(self, statement):
-        data = self.execute(statement)
+        data = self.connection.execute(statement)
         self.column_names = data.keys()
         data = list(map(dict, data))
 
@@ -339,7 +330,7 @@ class SqlSession(object):
         return data[0]
 
     def all(self, statement):
-        data = self.execute(statement)
+        data = self.connection.execute(statement)
         self.column_names = data.keys()
         result = list(map(dict, data))
         return result
