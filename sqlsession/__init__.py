@@ -183,10 +183,13 @@ class SqlSession(object):
         self.transaction = None
         self.as_role = as_role
         self.database_type = 'pgsql'
+        self.disposable = False
 
         if isinstance(param, dict):
+            self.database_type = get_value(param, ['type', 'db_type'], 'pgsql')
             self.engine = create_engine(param)
             self.metadata = sqlalchemy.MetaData(self.engine)
+            self.disposable = True
 
         elif isinstance(param, sqlalchemy.engine.Engine):
             self.engine = param
@@ -212,6 +215,8 @@ class SqlSession(object):
             self.transaction = None
 
         self.connection.close()
+        if self.disposable:
+            self.engine.dispose()
 
     def begin(self):
         self.transaction = self.connection.begin()
