@@ -185,18 +185,17 @@ class SqlSession(object):
         self.database_type = 'pgsql'
         self.disposable = False
 
-        if isinstance(param, dict):
+
+        if isinstance(param, sqlalchemy.engine.Engine):
+            self.engine = param
+            self.metadata = sqlalchemy.MetaData(self.engine)
+
+        else:
             self.database_type = get_value(param, ['type', 'db_type'], 'pgsql')
             self.engine = create_engine(param)
             self.metadata = sqlalchemy.MetaData(self.engine)
             self.disposable = True
 
-        elif isinstance(param, sqlalchemy.engine.Engine):
-            self.engine = param
-            self.metadata = sqlalchemy.MetaData(self.engine)
-
-        else:
-            raise ValueError("No parameters to initialize Session")
 
     def __enter__(self):
         self.connection = self.engine.connect()
