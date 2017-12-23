@@ -185,7 +185,6 @@ class SqlSession(object):
         self.database_type = 'pgsql'
         self.disposable = False
 
-
         if isinstance(param, sqlalchemy.engine.Engine):
             self.engine = param
             self.metadata = sqlalchemy.MetaData(self.engine)
@@ -251,7 +250,6 @@ class SqlSession(object):
 
     def get_unbound_connection(self):
         return self.engine.contextual_connect(close_with_result=True).execution_options(stream_results=True)
-
 
     def get_table(self, schema_table_name):
         t = schema_table_name.split('.')
