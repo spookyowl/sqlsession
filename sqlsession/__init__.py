@@ -1,6 +1,7 @@
 import re
 import sqlalchemy
 import sqlalchemy.engine
+from sqlalchemy import func
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.schema import Table
 from sqlalchemy.sql.expression import insert, select, update, delete
@@ -233,6 +234,9 @@ class SqlSession(object):
 
     def execute(self, statement):
 
+        #if isinstance(statement, text):
+        #    statement = text_statement(statement)
+
         if self.transaction is not None:
             return self.connection.execute(statement)
 
@@ -341,6 +345,26 @@ class SqlSession(object):
         stmt = self.get_statement(table, condition, order)
         return self.all(stmt)
 
+    def iter_all(self, table, condition=None, order=None):
+        stmt = self.get_statement(table, condition, order)
+        connection = self.get_unbound_connection()
+        data = connection.execute(stmt)
+        result = map(dict, data)
+        return result
+
+    def count(self, table, condition):
+
+        if isinstance(table, str) or isinstance(table, unicode):
+            table = self.get_table(table)
+
+        if isinstance(condition, dict):
+            condition = build_condition_from_dict(table, condition)
+
+        stmt = select([func.count('*')]).where(condition)
+        data = self.connection.execute(stmt)
+        data = list(data)[0][0]
+        return data
+
     def one(self, statement):
         data = self.connection.execute(statement)
         self.column_names = data.keys()
@@ -360,7 +384,8 @@ class SqlSession(object):
         result = list(map(dict, data))
         return result
 
-    def drop_table(table):
+
+    def drop_table(self, table):
         if isinstance(table, str):
             table = self.get_table(table)
 
