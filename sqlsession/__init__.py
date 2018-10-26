@@ -304,7 +304,7 @@ class SqlSession(object):
         if isinstance(condition, dict):
             condition = build_condition_from_dict(table, condition)
             stmt = delete(table).where(condition)
-            self.execute(stmt)
+            return self.execute(stmt)
 
     def truncate(self, table):
         raise RuntimeError('Not yet inmplement')
