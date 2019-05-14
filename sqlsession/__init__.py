@@ -8,6 +8,8 @@ from sqlalchemy.sql.expression import insert, select, update, delete
 from sqlalchemy.sql.expression import text as text_statement
 from sqlalchemy import and_
 from sqlalchemy.exc import IntegrityError
+from psycopg2.extensions import QuotedString as SqlString
+
 import urllib
 
 try:
@@ -131,11 +133,11 @@ def build_order_from_list(table, order_list):
 
     def interpret_column(column):
 
-        if isinstance(order_list, tuple):
-            return get_column(order_list[1], order_list[0])
+        if isinstance(column, tuple):
+            return get_column(column[1], column[0])
 
-        if isinstance(order_list, str) or isinstance(order_list, unicode):
-            return get_column(order_list, 'asc')
+        if isinstance(column, str) or isinstance(column, text):
+            return get_column(column, 'asc')
 
         else:
             raise ValueError('Can not interpret order statement. Use list of strings or tuples.')
@@ -391,6 +393,12 @@ class SqlSession(object):
 
         table.drop()
 
+    def exists(self, table):
+        if isinstance(table, str):
+            table = self.get_table(table)
+
+        return self.engine.dialect.has_table(engine, table)
+
     def get_current_timestamp(self):
         statement = 'SELECT current_timestamp AS now;'
         return self.one(statement)['now']
@@ -470,3 +478,13 @@ class SqlSession(object):
             raise ValueError('User name can contain only letters and numbers')
 
         self.execute('SET role=%s' % user_name)
+
+    def set_user_password(self, user_name, password):
+        if not re.match('[a-zA-Z0-9]*', user_name):
+            raise ValueError('User name can contain only letters and numbers')
+        
+        #TODO: 
+        escaped_passord = SqlString(password)
+        escaped_passord.encoding = 'utf-8'
+
+        self.execute("ALTER USER %s WITH PASSWORD %s;" % (user_name, escaped_passord))
