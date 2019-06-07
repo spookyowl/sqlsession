@@ -394,10 +394,7 @@ class SqlSession(object):
         table.drop()
 
     def exists(self, table):
-        if isinstance(table, str):
-            table = self.get_table(table)
-
-        return self.engine.dialect.has_table(engine, table)
+        return self.engine.dialect.has_table(self.engine, table)
 
     def get_current_timestamp(self):
         statement = 'SELECT current_timestamp AS now;'
@@ -412,63 +409,63 @@ class SqlSession(object):
             self.connection.connection.connection.notices.callback = callback
 
     def add_user(self, user_name):
-        if not re.match('[a-zA-Z0-9]*', user_name):
+        if not re.match('[a-zA-Z0-9_]*', user_name):
             raise ValueError('User name can contain only letters and numbers')
 
         self.execute('CREATE USER %s' % user_name)
 
     def add_group(self, group_name):
-        if not re.match('[a-zA-Z0-9]*', group_name):
+        if not re.match('[a-zA-Z0-9_]*', group_name):
             raise ValueError('Group name can contain only letters and numbers')
 
         self.execute('CREATE GROUP %s' % group_name)
 
     def rename_user(self, old_user_name, new_user_name):
 
-        if not re.match('[a-zA-Z0-9]*', old_user_name):
+        if not re.match('[a-zA-Z0-9_]*', old_user_name):
             raise ValueError('Old user name can contain only letters and numbers')
 
-        if not re.match('[a-zA-Z0-9]*', new_user_name):
+        if not re.match('[a-zA-Z0-9_]*', new_user_name):
             raise ValueError('New user name can contain only letters and numbers')
 
         self.execute('ALTER USER %s RENAME TO %s;' % (old_user_name, new_user_name))
 
     def rename_group(self, old_group_name, new_group_name):
 
-        if not re.match('[a-zA-Z0-9]*', old_group_name):
+        if not re.match('[a-zA-Z0-9_]*', old_group_name):
             raise ValueError('Old group name can contain only letters and numbers')
 
-        if not re.match('[a-zA-Z0-9]*', new_group_name):
+        if not re.match('[a-zA-Z0-9_]*', new_group_name):
             raise ValueError('New group name can contain only letters and numbers')
 
         self.execute('ALTER GROUP %s RENAME TO %s;' % (old_group_name, new_group_name))
 
     def add_user_to_group(self, user_name, group_name):
-        if not re.match('[a-zA-Z0-9]*', user_name):
+        if not re.match('[a-zA-Z0-9_]*', user_name):
             raise ValueError('User name can contain only letters and numbers')
 
-        if not re.match('[a-zA-Z0-9]*', group_name):
+        if not re.match('[a-zA-Z0-9_]*', group_name):
             raise ValueError('Group name can contain only letters and numbers')
 
         self.execute('ALTER GROUP %s ADD USER %s' % (group_name, user_name))
 
     def drop_user_from_group(self, user_name, group_name):
-        if not re.match('[a-zA-Z0-9]*', user_name):
+        if not re.match('[a-zA-Z0-9_]*', user_name):
             raise ValueError('User name can contain only letters and numbers')
 
-        if not re.match('[a-zA-Z0-9]*', group_name):
+        if not re.match('[a-zA-Z0-9_]*', group_name):
             raise ValueError('Group name can contain only letters and numbers')
 
         self.execute('ALTER GROUP %s DROP USER %s' % (group_name, user_name))
 
     def drop_user(self, user_name):
-        if not re.match('[a-zA-Z0-9]*', user_name):
+        if not re.match('[a-zA-Z0-9_]*', user_name):
             raise ValueError('User name can contain only letters and numbers')
 
         self.execute('DROP USER %s' % user_name)
 
     def drop_group(self, group_name):
-        if not re.match('[a-zA-Z0-9]*', group_name):
+        if not re.match('[a-zA-Z0-9_]*', group_name):
             raise ValueError('User name can contain only letters and numbers')
 
         self.execute('DROP GROUP %s' % group_name)
@@ -478,6 +475,16 @@ class SqlSession(object):
             raise ValueError('User name can contain only letters and numbers')
 
         self.execute('SET role=%s' % user_name)
+
+    def grant_role(self, user_name, target_role):
+
+        if not re.match('[a-zA-Z][a-zA-Z0-9_]*', user_name):
+            raise ValueError('User name can contain only letters and numbers')
+
+        if not re.match('[a-zA-Z0-9_]*', target_role):
+            raise ValueError('Target role can contain only letters and numbers')
+            
+        self.execute('GRANT %s TO %s;'  % (user_name, target_role))
 
     def set_user_password(self, user_name, password):
         if not re.match('[a-zA-Z0-9]*', user_name):
