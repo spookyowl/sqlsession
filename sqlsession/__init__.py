@@ -393,8 +393,15 @@ class SqlSession(object):
 
         table.drop()
 
-    def exists(self, table):
-        return self.engine.dialect.has_table(self.engine, table)
+    def exists(self, schema_table_name):
+
+        if '.' in schema_table_name:
+            schema_name, table_name = schema_table_name.split('.')
+        else:
+            schema_name = None
+            table_name = schema_table_name
+
+        return self.engine.has_table(table_name, schema_name)
 
     def get_current_timestamp(self):
         statement = 'SELECT current_timestamp AS now;'

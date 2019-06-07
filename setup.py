@@ -4,7 +4,7 @@ from setuptools import setup
 
 setup(
     name="sqlsession",
-    version="0.1.26",
+    version="0.1.27",
     description='Dirt simple CRUD API to access SQL databases',
     author='Peter Facka',
     url='https://github.com/spookyowl/sqlsession',
