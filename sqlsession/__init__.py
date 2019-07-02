@@ -177,6 +177,15 @@ class NoticeCollector(object):
     def __iter__(self):
         return iter(self.buf)
 
+    def __getitem__(self, val):
+        return self.buf.__getitem__(val)
+
+    def __setitem__(self, i, val):
+        return self.buf.__setitem__(i, val)
+
+    def __setslice__(self, i, j, x):
+        return self.buf.__setslice__(i, j, x)
+
 
 class SqlSession(object):
 
