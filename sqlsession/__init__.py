@@ -1,3 +1,5 @@
+from gevent import monkey
+monkey.patch_all()
 import re
 import sqlalchemy
 import sqlalchemy.engine
@@ -8,7 +10,10 @@ from sqlalchemy.sql.expression import insert, select, update, delete
 from sqlalchemy.sql.expression import text as text_statement
 from sqlalchemy import and_
 from sqlalchemy.exc import IntegrityError
+
 from psycopg2.extensions import QuotedString as SqlString
+import psycopg2.extensions
+import gevent.socket
 
 import urllib
 
@@ -63,6 +68,7 @@ def create_engine(params):
 
     #TODO: harmonize, use quoting
     if db_type == 'pgsql':
+        make_psycopg_green()
         url = 'postgresql+psycopg2://%s:%s@%s:%s/%s' % ctx
 
     elif db_type == 'mysql':
@@ -77,6 +83,36 @@ def create_engine(params):
 
     engine = sqlalchemy.create_engine(url, implicit_returning=True)
     return engine
+
+
+def make_psycopg_green():
+    """Configure Psycopg to be used with gevent in non-blocking way."""
+    if not hasattr(psycopg2.extensions, 'set_wait_callback'):
+        raise ImportError(
+            "support for coroutines not available in this Psycopg version (%s)"
+            % psycopg2.__version__)
+
+    psycopg2.extensions.set_wait_callback(gevent_wait_callback)
+
+
+def gevent_wait_callback(conn, timeout=None,
+        # access these objects with LOAD_FAST instead of LOAD_GLOBAL lookup
+        POLL_OK = psycopg2.extensions.POLL_OK,
+        POLL_READ = psycopg2.extensions.POLL_READ,
+        POLL_WRITE = psycopg2.extensions.POLL_WRITE,
+        wait_read = gevent.socket.wait_read,
+        wait_write = gevent.socket.wait_write):
+    """A wait callback useful to allow gevent to work with Psycopg."""
+    while 1:
+        state = conn.poll()
+        if state == POLL_OK:
+            break
+        elif state == POLL_READ:
+            wait_read(conn.fileno(), timeout=timeout)
+        elif state == POLL_WRITE:
+            wait_write(conn.fileno(), timeout=timeout)
+        else:
+            raise psycopg2.OperationalError("Bad result from poll: %r" % state)
 
 
 def preprocess_table_data(table, data):
