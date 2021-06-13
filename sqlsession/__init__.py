@@ -28,10 +28,13 @@ except NameError:
     text = str
 
 
+table_name_re = '^[a-zA-Z_ŠŽÁÂÂÉËÍÎÓÔŐÖÚÜÝßáäçéëíóôöúüý]+[a-zA-Z0-9_ŠŽÁÂÂÉËÍÎÓÔŐÖÚÜÝßáäçéëíóôöúüý]*$'
+
 #TODO: Lazy session !!!
 #NOTE: Lazy sessions are problematic. potentionaly require log running connections
 # with open cursor blocking reloads of tables. Solution: timeouts client/server side
 # caching, throtling
+
 
 def get_value(data, keys, default=None):
     result = None
@@ -46,7 +49,28 @@ def get_value(data, keys, default=None):
         return default
 
 
-def create_engine(params):
+def parse_schema_table_name(name, default_schema=None):
+
+    if '.' in name:
+        schema_name, table_name = name.split('.')
+
+        if not re.match(table_name_re, table_name):
+            raise ValueError('Table name "%s" contains unsupported characters')
+
+        if not re.match(table_name_re, schema_name):
+            raise ValueError('Schema name "%s" contains unsupported characters')
+
+    else:
+        schema_name = default_schema
+        table_name = schema_table_name
+
+        if not re.match(table_name_re, table_name):
+            raise ValueError('Table name "%s" contains unsupported characters')
+
+    return schema_name, table_name
+
+
+def create_engine(params, connect_args=None):
 
     db_type = get_value(params, ['type', 'db_type'], 'pgsql')
     default_port = None
@@ -54,7 +78,7 @@ def create_engine(params):
     if db_type == 'mysql':
         default_port = 3306
 
-    elif db_type == 'pgsql':
+    elif db_type in ('pgsql', 'postgres', 'postgresql'):
         default_port = 5432
 
     elif db_type == 'mssql':
@@ -67,7 +91,7 @@ def create_engine(params):
            get_value(params, ['database', 'db_name', 'database_name', 'db']))
 
     #TODO: harmonize, use quoting
-    if db_type == 'pgsql':
+    if db_type in ('pgsql', 'postgres', 'postgresql'):
         make_psycopg_green()
         url = 'postgresql+psycopg2://%s:%s@%s:%s/%s' % ctx
 
@@ -81,7 +105,11 @@ def create_engine(params):
     else:
         raise ValueError('db_type must be eighter "mysql"/"pgsql"/"mssql"')
 
-    engine = sqlalchemy.create_engine(url, implicit_returning=True)
+    if connect_args is not None:
+        engine = sqlalchemy.create_engine(url, implicit_returning=True, connect_args=connect_args)
+    else:
+        engine = sqlalchemy.create_engine(url, implicit_returning=True)
+
     return engine
 
 
@@ -225,7 +253,7 @@ class NoticeCollector(object):
 
 class SqlSession(object):
 
-    def __init__(self, param = None, as_role=None):
+    def __init__(self, param = None, as_role=None, connect_args=None):
 
         self.column_names = None
         self.transaction = None
@@ -239,7 +267,7 @@ class SqlSession(object):
 
         else:
             self.database_type = get_value(param, ['type', 'db_type'], 'pgsql')
-            self.engine = create_engine(param)
+            self.engine = create_engine(param, connect_args)
             self.metadata = sqlalchemy.MetaData(self.engine)
             self.disposable = True
 
@@ -431,21 +459,28 @@ class SqlSession(object):
         result = list(map(dict, data))
         return result
 
+    def drop_table(self, table, cascade=False):
+        schema_name, table_name = parse_schema_table_name(table, 'public')
 
-    def drop_table(self, table):
-        if isinstance(table, str):
+        if cascade:
+            return self.execute('DROP TABLE %s.%s CASCADE;' % (schema_name, table_name))
+        else:
+            return self.execute('DROP TABLE %s.%s;' % (schema_name, table_name))
+
+    def drop_table_if_exists(self, table, cascade=False):
+        schema_name, table_name = parse_schema_table_name(table, 'public')
+
+        if cascade:
+            return self.execute('DROP TABLE %s.%s CASCADE;' % (schema_name, table_name))
+        else:
+            return self.execute('DROP TABLE %s.%s;' % (schema_name, table_name))
+
+        if self.exists(table):
             table = self.get_table(table)
-
-        table.drop()
+            table.drop()
 
     def exists(self, schema_table_name):
-
-        if '.' in schema_table_name:
-            schema_name, table_name = schema_table_name.split('.')
-        else:
-            schema_name = None
-            table_name = schema_table_name
-
+        schema_name, table_name = parse_schema_table_name(schema_table_name)
         return self.engine.has_table(table_name, schema_name)
 
     def get_current_timestamp(self):
@@ -547,3 +582,15 @@ class SqlSession(object):
         escaped_passord.encoding = 'utf-8'
 
         self.execute("ALTER USER %s WITH PASSWORD %s;" % (user_name, escaped_passord))
+
+    def analyze_table(self, table):
+        schema_name, table_name =  parse_schema_table_name(table, 'public')
+
+        self.execute("ANALYZE %s.%s;" % (schema_name, table_name))
+
+    def vacuum_analyze_table(self, table):
+        schema_name, table_name = parse_schema_table_name(table, 'public')
+
+        self.execute("VACUUM ANALYZE %s.%s;" % (schema_name, table_name))
+
+
