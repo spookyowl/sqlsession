@@ -416,6 +416,20 @@ class SqlSession(object):
 
         return self.one(stmt)
 
+    def fetch_maybe(self, table, condition):
+        if isinstance(table, str) or isinstance(table, unicode):
+            table = self.get_table(table)
+
+        stmt = table.select()
+
+        if isinstance(condition, dict):
+            condition = build_condition_from_dict(table, condition)
+
+        if condition is not None:
+            stmt = stmt.where(condition)
+
+        return self.maybe(stmt)
+
     def fetch_all(self, table, condition=None, order=None):
         stmt = self.get_statement(table, condition, order)
         return self.all(stmt)
@@ -427,7 +441,23 @@ class SqlSession(object):
         result = map(dict, data)
         return result
 
-    def count(self, table, condition):
+    def count(self, table, condition=None):
+
+        if isinstance(table, str) or isinstance(table, unicode):
+            table = self.get_table(table)
+
+        if condition is not None and isinstance(condition, dict):
+            condition = build_condition_from_dict(table, condition)
+            stmt = select([func.count('*')]).select_from(table).where(condition)
+
+        else:
+            stmt = select([func.count('*')]).select_from(table)
+
+        data = self.connection.execute(stmt)
+        data = list(data)[0][0]
+        return data
+
+    def max(self, table, column_name, condition):
 
         if isinstance(table, str) or isinstance(table, unicode):
             table = self.get_table(table)
@@ -435,7 +465,20 @@ class SqlSession(object):
         if isinstance(condition, dict):
             condition = build_condition_from_dict(table, condition)
 
-        stmt = select([func.count('*')]).where(condition)
+        stmt = select([func.max(column_name)]).where(condition)
+        data = self.connection.execute(stmt)
+        data = list(data)[0][0]
+        return data
+
+    def min(self, table, column_name, condition):
+
+        if isinstance(table, str) or isinstance(table, unicode):
+            table = self.get_table(table)
+
+        if isinstance(condition, dict):
+            condition = build_condition_from_dict(table, condition)
+
+        stmt = select([func.min(column_name)]).where(condition)
         data = self.connection.execute(stmt)
         data = list(data)[0][0]
         return data
@@ -450,6 +493,19 @@ class SqlSession(object):
 
         elif len(data) == 0:
             raise SqlSessionNotFound("Row not found")
+
+        return data[0]
+
+    def maybe(self, statement):
+        data = self.connection.execute(statement)
+        self.column_names = data.keys()
+        data = list(map(dict, data))
+
+        if len(data) > 1:
+            raise SqlSessionTooMany("Expected exaclty one record, %s found" % len(data))
+
+        elif len(data) == 0:
+            return None
 
         return data[0]
 
