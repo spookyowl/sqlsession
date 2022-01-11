@@ -540,7 +540,7 @@ class SqlSession(object):
         return self.engine.has_table(table_name, schema_name)
 
     def get_current_timestamp(self):
-        statement = 'SELECT current_timestamp AS now;'
+        statement = 'SELECT clock_timestamp() AS now;'
         return self.one(statement)['now']
 
     def get_local_timestamp(self):
