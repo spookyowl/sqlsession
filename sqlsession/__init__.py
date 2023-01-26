@@ -62,7 +62,7 @@ def parse_schema_table_name(name, default_schema=None):
 
     else:
         schema_name = default_schema
-        table_name = schema_table_name
+        table_name = name
 
         if not re.match(table_name_re, table_name):
             raise ValueError('Table name "%s" contains unsupported characters')
@@ -271,8 +271,8 @@ class SqlSession(object):
             self.metadata = sqlalchemy.MetaData(self.engine)
             self.disposable = True
 
-
-    def __enter__(self):
+    def connect(self):
+        
         self.connection = self.engine.connect()
 
         if self.database_type == 'pgsql':
@@ -281,9 +281,8 @@ class SqlSession(object):
         if self.as_role is not None:
             self.set_role(self.as_role)
 
-        return self
+    def disconnect(self):
 
-    def __exit__(self, type, value, traceback):
         if self.transaction is not None:
             self.transaction.commit()
             self.transaction = None
@@ -291,6 +290,13 @@ class SqlSession(object):
         self.connection.close()
         if self.disposable:
             self.engine.dispose()
+       
+    def __enter__(self):
+        self.connect()
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self.disconnect()
 
     def begin(self):
         self.transaction = self.connection.begin()
