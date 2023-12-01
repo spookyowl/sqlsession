@@ -85,7 +85,7 @@ def create_engine(params, connect_args=None):
         default_port = 1433
 
     ctx = (get_value(params, ['user']),
-           get_value(params, ['passwd', 'password', 'pass']),
+           urllib.parse.quote_plus(get_value(params, ['passwd', 'password', 'pass'])),
            get_value(params, ['host', 'server'], 'localhost'),
            get_value(params, ['port'], default_port),
            get_value(params, ['database', 'db_name', 'database_name', 'db']))
