@@ -1,21 +1,22 @@
 from gevent import monkey
+
 monkey.patch_all()
 import re
+import urllib
+
+import gevent.socket
+import psycopg2.extensions
 import sqlalchemy
 import sqlalchemy.engine
-from sqlalchemy import func
+from psycopg2.extensions import QuotedString as SqlString
+from sqlalchemy import and_, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.schema import Table
-from sqlalchemy.sql.expression import insert, select, update, delete
+from sqlalchemy.sql.expression import delete, insert, select
 from sqlalchemy.sql.expression import text as text_statement
-from sqlalchemy import and_
-from sqlalchemy.exc import IntegrityError
-
-from psycopg2.extensions import QuotedString as SqlString
-import psycopg2.extensions
-import gevent.socket
-
-import urllib
+from sqlalchemy.sql.expression import update
+from sqlalchemy.pool import pool
 
 try:
     import itertools.imap as map
@@ -28,10 +29,10 @@ except NameError:
     text = str
 
 
-table_name_re = '^[a-zA-Z_ŠŽÁÂÂÉËÍÎÓÔŐÖÚÜÝßáäçéëíóôöúüý]+[a-zA-Z0-9_ŠŽÁÂÂÉËÍÎÓÔŐÖÚÜÝßáäçéëíóôöúüý]*$'
+table_name_re = "^[a-zA-Z_ŠŽÁÂÂÉËÍÎÓÔŐÖÚÜÝßáäçéëíóôöúüý]+[a-zA-Z0-9_ŠŽÁÂÂÉËÍÎÓÔŐÖÚÜÝßáäçéëíóôöúüý]*$"
 
-#TODO: Lazy session !!!
-#NOTE: Lazy sessions are problematic. potentionaly require log running connections
+# TODO: Lazy session !!!
+# NOTE: Lazy sessions are problematic. potentionaly require log running connections
 # with open cursor blocking reloads of tables. Solution: timeouts client/server side
 # caching, throtling
 
@@ -50,9 +51,8 @@ def get_value(data, keys, default=None):
 
 
 def parse_schema_table_name(name, default_schema=None):
-
-    if '.' in name:
-        schema_name, table_name = name.split('.')
+    if "." in name:
+        schema_name, table_name = name.split(".")
 
         if not re.match(table_name_re, table_name):
             raise ValueError('Table name "%s" contains unsupported characters')
@@ -71,42 +71,44 @@ def parse_schema_table_name(name, default_schema=None):
 
 
 def create_engine(params, connect_args=None):
-
-    db_type = get_value(params, ['type', 'db_type'], 'pgsql')
+    db_type = get_value(params, ["type", "db_type"], "pgsql")
     default_port = None
 
-    if db_type == 'mysql':
+    if db_type == "mysql":
         default_port = 3306
 
-    elif db_type in ('pgsql', 'postgres', 'postgresql'):
+    elif db_type in ("pgsql", "postgres", "postgresql"):
         default_port = 5432
 
-    elif db_type == 'mssql':
+    elif db_type == "mssql":
         default_port = 1433
 
-    ctx = (get_value(params, ['user']),
-           urllib.parse.quote_plus(get_value(params, ['passwd', 'password', 'pass'])),
-           get_value(params, ['host', 'server'], 'localhost'),
-           get_value(params, ['port'], default_port),
-           get_value(params, ['database', 'db_name', 'database_name', 'db']))
+    ctx = (
+        get_value(params, ["user"]),
+        urllib.parse.quote_plus(get_value(params, ["passwd", "password", "pass"])),
+        get_value(params, ["host", "server"], "localhost"),
+        get_value(params, ["port"], default_port),
+        get_value(params, ["database", "db_name", "database_name", "db"]),
+    )
 
-    #TODO: harmonize, use quoting
-    if db_type in ('pgsql', 'postgres', 'postgresql'):
+    # TODO: harmonize, use quoting
+    if db_type in ("pgsql", "postgres", "postgresql"):
         make_psycopg_green()
-        url = 'postgresql+psycopg2://%s:%s@%s:%s/%s' % ctx
+        url = "postgresql+psycopg2://%s:%s@%s:%s/%s" % ctx
 
-    elif db_type == 'mysql':
-        url = 'mysql+mysqldb://%s:%s@%s:%s/%s' % ctx
+    elif db_type == "mysql":
+        url = "mysql+mysqldb://%s:%s@%s:%s/%s" % ctx
 
-    elif db_type == 'mssql':
-        url = 'mssql+pyodbc://%s:%s@%s:%s/%s?driver=SQLServer13' % ctx
-
+    elif db_type == "mssql":
+        url = "mssql+pyodbc://%s:%s@%s:%s/%s?driver=SQLServer13" % ctx
 
     else:
         raise ValueError('db_type must be eighter "mysql"/"pgsql"/"mssql"')
 
     if connect_args is not None:
-        engine = sqlalchemy.create_engine(url, implicit_returning=True, connect_args=connect_args)
+        engine = sqlalchemy.create_engine(
+            url, implicit_returning=True, connect_args=connect_args
+        )
     else:
         engine = sqlalchemy.create_engine(url, implicit_returning=True)
 
@@ -115,21 +117,25 @@ def create_engine(params, connect_args=None):
 
 def make_psycopg_green():
     """Configure Psycopg to be used with gevent in non-blocking way."""
-    if not hasattr(psycopg2.extensions, 'set_wait_callback'):
+    if not hasattr(psycopg2.extensions, "set_wait_callback"):
         raise ImportError(
             "support for coroutines not available in this Psycopg version (%s)"
-            % psycopg2.__version__)
+            % psycopg2.__version__
+        )
 
     psycopg2.extensions.set_wait_callback(gevent_wait_callback)
 
 
-def gevent_wait_callback(conn, timeout=None,
-        # access these objects with LOAD_FAST instead of LOAD_GLOBAL lookup
-        POLL_OK = psycopg2.extensions.POLL_OK,
-        POLL_READ = psycopg2.extensions.POLL_READ,
-        POLL_WRITE = psycopg2.extensions.POLL_WRITE,
-        wait_read = gevent.socket.wait_read,
-        wait_write = gevent.socket.wait_write):
+def gevent_wait_callback(
+    conn,
+    timeout=None,
+    # access these objects with LOAD_FAST instead of LOAD_GLOBAL lookup
+    POLL_OK=psycopg2.extensions.POLL_OK,
+    POLL_READ=psycopg2.extensions.POLL_READ,
+    POLL_WRITE=psycopg2.extensions.POLL_WRITE,
+    wait_read=gevent.socket.wait_read,
+    wait_write=gevent.socket.wait_write,
+):
     """A wait callback useful to allow gevent to work with Psycopg."""
     while 1:
         state = conn.poll()
@@ -144,7 +150,6 @@ def gevent_wait_callback(conn, timeout=None,
 
 
 def preprocess_table_data(table, data):
-
     if isinstance(data, dict):
         data = [data]
 
@@ -175,7 +180,7 @@ def build_pkey_condition(table, data):
 def build_condition_from_dict(table, dict_condition):
     condition = []
 
-    for key,value in dict_condition.items():
+    for key, value in dict_condition.items():
         column = getattr(table.columns, key)
         condition.append(column == value)
 
@@ -183,35 +188,33 @@ def build_condition_from_dict(table, dict_condition):
 
 
 def build_order_from_list(table, order_list):
-
     def get_column(key, direction):
-
-        if direction is not None and direction not in ('desc', 'asc'):
+        if direction is not None and direction not in ("desc", "asc"):
             raise ValueError("Order direction must be 'desc' or 'asc'")
 
-        if direction == 'desc':
+        if direction == "desc":
             return getattr(table.columns, key).desc()
 
         else:
             return getattr(table.columns, key)
 
     def interpret_column(column):
-
         if isinstance(column, tuple):
             return get_column(column[1], column[0])
 
         if isinstance(column, str) or isinstance(column, text):
-            return get_column(column, 'asc')
+            return get_column(column, "asc")
 
         else:
-            raise ValueError('Can not interpret order statement. Use list of strings or tuples.')
+            raise ValueError(
+                "Can not interpret order statement. Use list of strings or tuples."
+            )
 
     if isinstance(order_list, list):
         return list(map(interpret_column, order_list))
 
     else:
         return [interpret_column(order_list)]
-
 
 
 class SqlSessionNotFound(Exception):
@@ -223,7 +226,6 @@ class SqlSessionTooMany(Exception):
 
 
 class NoticeCollector(object):
-
     def __init__(self):
         self.buf = []
         self.callback = None
@@ -252,13 +254,11 @@ class NoticeCollector(object):
 
 
 class SqlSession(object):
-
-    def __init__(self, param = None, as_role=None, connect_args=None):
-
+    def __init__(self, param=None, as_role=None, connect_args=None):
         self.column_names = None
         self.transaction = None
         self.as_role = as_role
-        self.database_type = 'pgsql'
+        self.database_type = "pgsql"
         self.disposable = False
 
         if isinstance(param, sqlalchemy.engine.Engine):
@@ -266,23 +266,21 @@ class SqlSession(object):
             self.metadata = sqlalchemy.MetaData(self.engine)
 
         else:
-            self.database_type = get_value(param, ['type', 'db_type'], 'pgsql')
+            self.database_type = get_value(param, ["type", "db_type"], "pgsql")
             self.engine = create_engine(param, connect_args)
             self.metadata = sqlalchemy.MetaData(self.engine)
             self.disposable = True
 
     def connect(self):
-        
         self.connection = self.engine.connect()
 
-        if self.database_type == 'pgsql':
+        if self.database_type == "pgsql":
             self.connection.connection.connection.notices = NoticeCollector()
 
         if self.as_role is not None:
             self.set_role(self.as_role)
 
     def disconnect(self):
-
         if self.transaction is not None:
             self.transaction.commit()
             self.transaction = None
@@ -290,7 +288,7 @@ class SqlSession(object):
         self.connection.close()
         if self.disposable:
             self.engine.dispose()
-       
+
     def __enter__(self):
         self.connect()
         return self
@@ -314,8 +312,7 @@ class SqlSession(object):
             self.transaction = None
 
     def execute(self, statement):
-
-        #if isinstance(statement, text):
+        # if isinstance(statement, text):
         #    statement = text_statement(statement)
 
         if self.transaction is not None:
@@ -323,7 +320,7 @@ class SqlSession(object):
 
         else:
             result = self.connection.execute(statement)
-            self.connection.execute('commit;')
+            self.connection.execute("commit;")
             return result
 
     def commit(self):
@@ -331,30 +328,36 @@ class SqlSession(object):
             self.transaction.commit()
             self.transaction = None
         else:
-            self.connection.execute('commit;')
+            self.connection.execute("commit;")
 
     def get_unbound_connection(self):
-        return self.engine.contextual_connect(close_with_result=True).execution_options(stream_results=True)
+        return self.engine.contextual_connect(close_with_result=True).execution_options(
+            stream_results=True
+        )
 
     def get_table(self, schema_table_name):
-        t = schema_table_name.split('.')
+        t = schema_table_name.split(".")
 
         if len(t) == 1:
             table_name = t[0]
-            return Table(table_name, self.metadata, autoload=True,
-                         autoload_with=self.engine)
+            return Table(
+                table_name, self.metadata, autoload=True, autoload_with=self.engine
+            )
 
         elif len(t) == 2:
             schema_name, table_name = t
-            return Table(table_name, self.metadata, autoload=True,
-                         autoload_with=self.engine,
-                         schema=schema_name)
+            return Table(
+                table_name,
+                self.metadata,
+                autoload=True,
+                autoload_with=self.engine,
+                schema=schema_name,
+            )
 
         else:
             raise ValueError("schema_table_name")
 
     def update(self, table, data, condition=None):
-
         if isinstance(table, str):
             table = self.get_table(table)
 
@@ -369,7 +372,6 @@ class SqlSession(object):
         return self.execute(stmt)
 
     def insert(self, table, data):
-
         if isinstance(table, str):
             table = self.get_table(table)
 
@@ -378,7 +380,6 @@ class SqlSession(object):
         return self.execute(stmt)
 
     def delete(self, table, condition=None):
-
         if isinstance(table, str):
             table = self.get_table(table)
 
@@ -388,10 +389,9 @@ class SqlSession(object):
             return self.execute(stmt)
 
     def truncate(self, table):
-        raise RuntimeError('Not yet inmplement')
+        raise RuntimeError("Not yet inmplement")
 
     def get_statement(self, table, condition, order):
-
         if isinstance(table, str) or isinstance(table, unicode):
             table = self.get_table(table)
 
@@ -448,23 +448,21 @@ class SqlSession(object):
         return result
 
     def count(self, table, condition=None):
-
         if isinstance(table, str) or isinstance(table, unicode):
             table = self.get_table(table)
 
         if condition is not None and isinstance(condition, dict):
             condition = build_condition_from_dict(table, condition)
-            stmt = select([func.count('*')]).select_from(table).where(condition)
+            stmt = select([func.count("*")]).select_from(table).where(condition)
 
         else:
-            stmt = select([func.count('*')]).select_from(table)
+            stmt = select([func.count("*")]).select_from(table)
 
         data = self.connection.execute(stmt)
         data = list(data)[0][0]
         return data
 
     def max(self, table, column_name, condition):
-
         if isinstance(table, str) or isinstance(table, unicode):
             table = self.get_table(table)
 
@@ -477,7 +475,6 @@ class SqlSession(object):
         return data
 
     def min(self, table, column_name, condition):
-
         if isinstance(table, str) or isinstance(table, unicode):
             table = self.get_table(table)
 
@@ -522,20 +519,20 @@ class SqlSession(object):
         return result
 
     def drop_table(self, table, cascade=False):
-        schema_name, table_name = parse_schema_table_name(table, 'public')
+        schema_name, table_name = parse_schema_table_name(table, "public")
 
         if cascade:
-            return self.execute('DROP TABLE %s.%s CASCADE;' % (schema_name, table_name))
+            return self.execute("DROP TABLE %s.%s CASCADE;" % (schema_name, table_name))
         else:
-            return self.execute('DROP TABLE %s.%s;' % (schema_name, table_name))
+            return self.execute("DROP TABLE %s.%s;" % (schema_name, table_name))
 
     def drop_table_if_exists(self, table, cascade=False):
-        schema_name, table_name = parse_schema_table_name(table, 'public')
+        schema_name, table_name = parse_schema_table_name(table, "public")
 
         if cascade:
-            return self.execute('DROP TABLE %s.%s CASCADE;' % (schema_name, table_name))
+            return self.execute("DROP TABLE %s.%s CASCADE;" % (schema_name, table_name))
         else:
-            return self.execute('DROP TABLE %s.%s;' % (schema_name, table_name))
+            return self.execute("DROP TABLE %s.%s;" % (schema_name, table_name))
 
         if self.exists(table):
             table = self.get_table(table)
@@ -546,113 +543,108 @@ class SqlSession(object):
         return self.engine.has_table(table_name, schema_name)
 
     def get_current_timestamp(self):
-        statement = 'SELECT clock_timestamp() AS now;'
-        return self.one(statement)['now']
+        statement = "SELECT clock_timestamp() AS now;"
+        return self.one(statement)["now"]
 
     def get_local_timestamp(self):
-        statement = 'SELECT localtimestamp AS now;'
-        return self.one(statement)['now']
+        statement = "SELECT localtimestamp AS now;"
+        return self.one(statement)["now"]
 
     def set_log_callback(self, callback):
-        if self.database_type == 'pgsql':
+        if self.database_type == "pgsql":
             self.connection.connection.connection.notices.callback = callback
 
     def add_user(self, user_name):
-        if not re.match('[a-zA-Z0-9_]*', user_name):
-            raise ValueError('User name can contain only letters and numbers')
+        if not re.match("[a-zA-Z0-9_]*", user_name):
+            raise ValueError("User name can contain only letters and numbers")
 
-        self.execute('CREATE USER %s' % user_name)
+        self.execute("CREATE USER %s" % user_name)
 
     def add_group(self, group_name):
-        if not re.match('[a-zA-Z0-9_]*', group_name):
-            raise ValueError('Group name can contain only letters and numbers')
+        if not re.match("[a-zA-Z0-9_]*", group_name):
+            raise ValueError("Group name can contain only letters and numbers")
 
-        self.execute('CREATE GROUP %s' % group_name)
+        self.execute("CREATE GROUP %s" % group_name)
 
     def rename_user(self, old_user_name, new_user_name):
+        if not re.match("[a-zA-Z0-9_]*", old_user_name):
+            raise ValueError("Old user name can contain only letters and numbers")
 
-        if not re.match('[a-zA-Z0-9_]*', old_user_name):
-            raise ValueError('Old user name can contain only letters and numbers')
+        if not re.match("[a-zA-Z0-9_]*", new_user_name):
+            raise ValueError("New user name can contain only letters and numbers")
 
-        if not re.match('[a-zA-Z0-9_]*', new_user_name):
-            raise ValueError('New user name can contain only letters and numbers')
-
-        self.execute('ALTER USER %s RENAME TO %s;' % (old_user_name, new_user_name))
+        self.execute("ALTER USER %s RENAME TO %s;" % (old_user_name, new_user_name))
 
     def rename_group(self, old_group_name, new_group_name):
+        if not re.match("[a-zA-Z0-9_]*", old_group_name):
+            raise ValueError("Old group name can contain only letters and numbers")
 
-        if not re.match('[a-zA-Z0-9_]*', old_group_name):
-            raise ValueError('Old group name can contain only letters and numbers')
+        if not re.match("[a-zA-Z0-9_]*", new_group_name):
+            raise ValueError("New group name can contain only letters and numbers")
 
-        if not re.match('[a-zA-Z0-9_]*', new_group_name):
-            raise ValueError('New group name can contain only letters and numbers')
-
-        self.execute('ALTER GROUP %s RENAME TO %s;' % (old_group_name, new_group_name))
+        self.execute("ALTER GROUP %s RENAME TO %s;" % (old_group_name, new_group_name))
 
     def add_user_to_group(self, user_name, group_name):
-        if not re.match('[a-zA-Z0-9_]*', user_name):
-            raise ValueError('User name can contain only letters and numbers')
+        if not re.match("[a-zA-Z0-9_]*", user_name):
+            raise ValueError("User name can contain only letters and numbers")
 
-        if not re.match('[a-zA-Z0-9_]*', group_name):
-            raise ValueError('Group name can contain only letters and numbers')
+        if not re.match("[a-zA-Z0-9_]*", group_name):
+            raise ValueError("Group name can contain only letters and numbers")
 
-        self.execute('ALTER GROUP %s ADD USER %s' % (group_name, user_name))
+        self.execute("ALTER GROUP %s ADD USER %s" % (group_name, user_name))
 
     def drop_user_from_group(self, user_name, group_name):
-        if not re.match('[a-zA-Z0-9_]*', user_name):
-            raise ValueError('User name can contain only letters and numbers')
+        if not re.match("[a-zA-Z0-9_]*", user_name):
+            raise ValueError("User name can contain only letters and numbers")
 
-        if not re.match('[a-zA-Z0-9_]*', group_name):
-            raise ValueError('Group name can contain only letters and numbers')
+        if not re.match("[a-zA-Z0-9_]*", group_name):
+            raise ValueError("Group name can contain only letters and numbers")
 
-        self.execute('ALTER GROUP %s DROP USER %s' % (group_name, user_name))
+        self.execute("ALTER GROUP %s DROP USER %s" % (group_name, user_name))
 
     def drop_user(self, user_name):
-        if not re.match('[a-zA-Z0-9_]*', user_name):
-            raise ValueError('User name can contain only letters and numbers')
+        if not re.match("[a-zA-Z0-9_]*", user_name):
+            raise ValueError("User name can contain only letters and numbers")
 
-        self.execute('DROP USER %s' % user_name)
+        self.execute("DROP USER %s" % user_name)
 
     def drop_group(self, group_name):
-        if not re.match('[a-zA-Z0-9_]*', group_name):
-            raise ValueError('User name can contain only letters and numbers')
+        if not re.match("[a-zA-Z0-9_]*", group_name):
+            raise ValueError("User name can contain only letters and numbers")
 
-        self.execute('DROP GROUP %s' % group_name)
+        self.execute("DROP GROUP %s" % group_name)
 
     def set_role(self, user_name):
-        if not re.match('[a-zA-Z0-9]*', user_name):
-            raise ValueError('User name can contain only letters and numbers')
+        if not re.match("[a-zA-Z0-9]*", user_name):
+            raise ValueError("User name can contain only letters and numbers")
 
-        self.execute('SET role=%s' % user_name)
+        self.execute("SET role=%s" % user_name)
 
     def grant_role(self, user_name, target_role):
+        if not re.match("[a-zA-Z][a-zA-Z0-9_]*", user_name):
+            raise ValueError("User name can contain only letters and numbers")
 
-        if not re.match('[a-zA-Z][a-zA-Z0-9_]*', user_name):
-            raise ValueError('User name can contain only letters and numbers')
+        if not re.match("[a-zA-Z0-9_]*", target_role):
+            raise ValueError("Target role can contain only letters and numbers")
 
-        if not re.match('[a-zA-Z0-9_]*', target_role):
-            raise ValueError('Target role can contain only letters and numbers')
-            
-        self.execute('GRANT %s TO %s;'  % (user_name, target_role))
+        self.execute("GRANT %s TO %s;" % (user_name, target_role))
 
     def set_user_password(self, user_name, password):
-        if not re.match('[a-zA-Z0-9]*', user_name):
-            raise ValueError('User name can contain only letters and numbers')
-        
-        #TODO: 
+        if not re.match("[a-zA-Z0-9]*", user_name):
+            raise ValueError("User name can contain only letters and numbers")
+
+        # TODO:
         escaped_passord = SqlString(password)
-        escaped_passord.encoding = 'utf-8'
+        escaped_passord.encoding = "utf-8"
 
         self.execute("ALTER USER %s WITH PASSWORD %s;" % (user_name, escaped_passord))
 
     def analyze_table(self, table):
-        schema_name, table_name =  parse_schema_table_name(table, 'public')
+        schema_name, table_name = parse_schema_table_name(table, "public")
 
         self.execute("ANALYZE %s.%s;" % (schema_name, table_name))
 
     def vacuum_analyze_table(self, table):
-        schema_name, table_name = parse_schema_table_name(table, 'public')
+        schema_name, table_name = parse_schema_table_name(table, "public")
 
         self.execute("VACUUM ANALYZE %s.%s;" % (schema_name, table_name))
-
-
