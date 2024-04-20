@@ -12,11 +12,11 @@ from psycopg2.extensions import QuotedString as SqlString
 from sqlalchemy import and_, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 from sqlalchemy.schema import Table
 from sqlalchemy.sql.expression import delete, insert, select
 from sqlalchemy.sql.expression import text as text_statement
 from sqlalchemy.sql.expression import update
-from sqlalchemy.pool import pool
 
 try:
     import itertools.imap as map
@@ -35,6 +35,7 @@ table_name_re = "^[a-zA-Z_ŠŽÁÂÂÉËÍÎÓÔŐÖÚÜÝßáäçéëíóôöú
 # NOTE: Lazy sessions are problematic. potentionaly require log running connections
 # with open cursor blocking reloads of tables. Solution: timeouts client/server side
 # caching, throtling
+#
 
 
 def get_value(data, keys, default=None):
@@ -70,8 +71,18 @@ def parse_schema_table_name(name, default_schema=None):
     return schema_name, table_name
 
 
-def create_engine(params, connect_args=None):
-    db_type = get_value(params, ["type", "db_type"], "pgsql")
+def build_url(param):
+    if "secret_arn" in param:
+        import botocore
+        import botocore.session
+        from aws_secretsmanager_caching import SecretCache, SecretCacheConfig
+
+        client = botocore.session.get_session().create_client("secretsmanager")
+        cache_config = SecretCacheConfig()
+        cache = SecretCache(config=cache_config, client=client)
+        param = cache.get_secret_string(param["secret_arn"])
+
+    db_type = get_value(param, ["type", "db_type"], "pgsql")
     default_port = None
 
     if db_type == "mysql":
@@ -84,11 +95,11 @@ def create_engine(params, connect_args=None):
         default_port = 1433
 
     ctx = (
-        get_value(params, ["user"]),
-        urllib.parse.quote_plus(get_value(params, ["passwd", "password", "pass"])),
-        get_value(params, ["host", "server"], "localhost"),
-        get_value(params, ["port"], default_port),
-        get_value(params, ["database", "db_name", "database_name", "db"]),
+        get_value(param, ["user"]),
+        urllib.parse.quote_plus(get_value(param, ["passwd", "password", "pass"])),
+        get_value(param, ["host", "server"], "localhost"),
+        get_value(param, ["port"], default_port),
+        get_value(param, ["database", "db_name", "database_name", "db"]),
     )
 
     # TODO: harmonize, use quoting
@@ -105,12 +116,18 @@ def create_engine(params, connect_args=None):
     else:
         raise ValueError('db_type must be eighter "mysql"/"pgsql"/"mssql"')
 
+    return url
+
+
+def create_engine(url, connect_args=None):
     if connect_args is not None:
         engine = sqlalchemy.create_engine(
-            url, implicit_returning=True, connect_args=connect_args
+            url, implicit_returning=True, connect_args=connect_args, poolclass=NullPool
         )
     else:
-        engine = sqlalchemy.create_engine(url, implicit_returning=True)
+        engine = sqlalchemy.create_engine(
+            url, implicit_returning=True, poolclass=NullPool
+        )
 
     return engine
 
@@ -253,41 +270,128 @@ class NoticeCollector(object):
         return self.buf.__setslice__(i, j, x)
 
 
+class EnginePool(object):
+    def __init__(self, param=None, pool_size=5):
+        self.database_type = get_value(param, ["type", "db_type"], "pgsql")
+        self.param = param
+        self.pool_size = pool_size
+        self.used_pool = set()
+        self.unused_pool = set()
+
+    def get_connection(self):
+        # print("GET CONNECTION", 'UN:', len(self.unused_pool), 'U:', len(self.used_pool))
+        if len(self.unused_pool) >= 1:
+            used = self.unused_pool.pop()
+            self.used_pool.add(used)
+
+        else:
+            # print("CONNECTING NEW")
+            used = self.connect()
+            self.used_pool.add(used)
+
+        # print("POOL SIZE", len(self.used_pool), len(self.unused_pool))
+        return used
+
+    def free_connection(self, used):
+        # print('FREE B', self.used_pool)
+        # TODO: once working put into try except ValueError
+        self.used_pool.remove(used)
+        # print('FREE AFTER', self.used_pool)
+
+        if len(self.used_pool) >= self.pool_size:
+            used[2].disconnect()
+            used[0].dispose()
+        else:
+            self.unused_pool.add(used)
+
+    def connect(self):
+        url = build_url(self.param)
+        engine = create_engine(url)
+        metadata = sqlalchemy.MetaData(engine)
+        connection = engine.connect()
+
+        if get_value(self.param, ["type", "db_type"], "pgsql"):
+            connection.connection.connection.notices = NoticeCollector()
+
+        return (engine, metadata, connection)
+
+    def dispose_pool(self):
+        pass
+
+
+engine_pools = {}
+
+
 class SqlSession(object):
-    def __init__(self, param=None, as_role=None, connect_args=None):
+    def __init__(self, param=None, as_role=None, connect_args=None, dont_pool=False):
         self.column_names = None
         self.transaction = None
         self.as_role = as_role
         self.database_type = "pgsql"
         self.disposable = False
+        self.dont_pool = False
 
+        #print("INIT")
         if isinstance(param, sqlalchemy.engine.Engine):
             self.engine = param
             self.metadata = sqlalchemy.MetaData(self.engine)
+            self.dont_pool = True
 
-        else:
+        elif dont_pool or connect_args is not None:
             self.database_type = get_value(param, ["type", "db_type"], "pgsql")
-            self.engine = create_engine(param, connect_args)
+            url = build_url(param)
+            self.engine = create_engine(url, connect_args)
             self.metadata = sqlalchemy.MetaData(self.engine)
             self.disposable = True
+            self.dont_pool = True
+
+        else:
+            if "secret_arn" not in param:
+                url = build_url(param)
+                key = url
+
+            else:
+                key = param["secret_arn"]
+
+            if key in engine_pools:
+                self.engine_pool = engine_pools[key]
+
+            else:
+                self.engine_pool = EnginePool(param)
+                engine_pools[key] = self.engine_pool
 
     def connect(self):
-        self.connection = self.engine.connect()
+        if self.dont_pool:
+            self.connection = self.engine.connect()
 
-        if self.database_type == "pgsql":
-            self.connection.connection.connection.notices = NoticeCollector()
+            if self.database_type == "pgsql":
+                self.connection.connection.connection.notices = NoticeCollector()
+
+        else:
+            (
+                self.engine,
+                self.metadata,
+                self.connection,
+            ) = self.engine_pool.get_connection()
 
         if self.as_role is not None:
             self.set_role(self.as_role)
 
     def disconnect(self):
-        if self.transaction is not None:
-            self.transaction.commit()
-            self.transaction = None
+        if self.dont_pool:
+            if self.transaction is not None:
+                self.transaction.commit()
+                self.transaction = None
 
-        self.connection.close()
-        if self.disposable:
-            self.engine.dispose()
+            self.connection.close()
+            if self.disposable:
+                self.engine.dispose()
+
+        else:
+            self.reset_role()
+            self.engine_pool.free_connection(
+                (self.engine, self.metadata, self.connection)
+            )
 
     def __enter__(self):
         self.connect()
@@ -619,6 +723,9 @@ class SqlSession(object):
             raise ValueError("User name can contain only letters and numbers")
 
         self.execute("SET role=%s" % user_name)
+
+    def reset_role(self):
+        self.execute("RESET role")
 
     def grant_role(self, user_name, target_role):
         if not re.match("[a-zA-Z][a-zA-Z0-9_]*", user_name):
