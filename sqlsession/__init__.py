@@ -3,6 +3,7 @@ from gevent import monkey
 monkey.patch_all()
 import re
 import urllib
+import json
 
 import gevent.socket
 import psycopg2.extensions
@@ -72,7 +73,7 @@ def parse_schema_table_name(name, default_schema=None):
 
 
 def build_url(param):
-    if "secret_arn" in param:
+    if param.get("secret_arn") is not None:
         import botocore
         import botocore.session
         from aws_secretsmanager_caching import SecretCache, SecretCacheConfig
@@ -80,7 +81,7 @@ def build_url(param):
         client = botocore.session.get_session().create_client("secretsmanager")
         cache_config = SecretCacheConfig()
         cache = SecretCache(config=cache_config, client=client)
-        param = cache.get_secret_string(param["secret_arn"])
+        param = json.loads(cache.get_secret_string(param["secret_arn"]))
 
     db_type = get_value(param, ["type", "db_type"], "pgsql")
     default_port = None
@@ -99,7 +100,7 @@ def build_url(param):
         urllib.parse.quote_plus(get_value(param, ["passwd", "password", "pass"])),
         get_value(param, ["host", "server"], "localhost"),
         get_value(param, ["port"], default_port),
-        get_value(param, ["database", "db_name", "database_name", "db"]),
+        get_value(param, ["database", "dbname", "db_name", "database_name", "db"]),
     )
 
     # TODO: harmonize, use quoting
@@ -279,24 +280,19 @@ class EnginePool(object):
         self.unused_pool = set()
 
     def get_connection(self):
-        # print("GET CONNECTION", 'UN:', len(self.unused_pool), 'U:', len(self.used_pool))
         if len(self.unused_pool) >= 1:
             used = self.unused_pool.pop()
             self.used_pool.add(used)
 
         else:
-            # print("CONNECTING NEW")
             used = self.connect()
             self.used_pool.add(used)
 
-        # print("POOL SIZE", len(self.used_pool), len(self.unused_pool))
         return used
 
     def free_connection(self, used):
-        # print('FREE B', self.used_pool)
         # TODO: once working put into try except ValueError
         self.used_pool.remove(used)
-        # print('FREE AFTER', self.used_pool)
 
         if len(self.used_pool) >= self.pool_size:
             used[2].disconnect()
@@ -331,7 +327,7 @@ class SqlSession(object):
         self.disposable = False
         self.dont_pool = False
 
-        #print("INIT")
+        #print("INIT", param)
         if isinstance(param, sqlalchemy.engine.Engine):
             self.engine = param
             self.metadata = sqlalchemy.MetaData(self.engine)
@@ -346,7 +342,7 @@ class SqlSession(object):
             self.dont_pool = True
 
         else:
-            if "secret_arn" not in param:
+            if param.get("secret_arn") is None:
                 url = build_url(param)
                 key = url
 
