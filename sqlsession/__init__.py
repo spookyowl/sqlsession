@@ -1,9 +1,9 @@
 from gevent import monkey
 
 monkey.patch_all()
+import json
 import re
 import urllib
-import json
 
 import gevent.socket
 import psycopg2.extensions
@@ -295,7 +295,7 @@ class EnginePool(object):
         self.used_pool.remove(used)
 
         if len(self.used_pool) >= self.pool_size:
-            used[2].disconnect()
+            used[2].close()
             used[0].dispose()
         else:
             self.unused_pool.add(used)
@@ -325,9 +325,9 @@ class SqlSession(object):
         self.as_role = as_role
         self.database_type = "pgsql"
         self.disposable = False
-        self.dont_pool = False
+        self.dont_pool = dont_pool
 
-        #print("INIT", param)
+        # print("INIT", param)
         if isinstance(param, sqlalchemy.engine.Engine):
             self.engine = param
             self.metadata = sqlalchemy.MetaData(self.engine)
@@ -384,6 +384,7 @@ class SqlSession(object):
                 self.engine.dispose()
 
         else:
+            self.drop_temp_tables()
             self.reset_role()
             self.engine_pool.free_connection(
                 (self.engine, self.metadata, self.connection)
@@ -751,3 +752,16 @@ class SqlSession(object):
         schema_name, table_name = parse_schema_table_name(table, "public")
 
         self.execute("VACUUM ANALYZE %s.%s;" % (schema_name, table_name))
+
+    def drop_temp_tables(self):
+        tables = self.all(
+            "select table_schema,table_name,table_type from information_schema.tables where table_schema = (select nspname from pg_namespace where oid  =  pg_my_temp_schema());"
+        )
+
+        for tbl in tables:
+            if tbl["table_type"] == "VIEW":
+                self.execute("DROP VIEW %s.%s CASCADE;" % (tbl["table_schema"], tbl["table_name"]))
+            else:
+                self.execute("DROP TABLE %s.%s CASCADE;" % (tbl["table_schema"], tbl["table_name"]))
+
+        # TODO: sequence
