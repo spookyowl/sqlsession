@@ -755,13 +755,23 @@ class SqlSession(object):
 
     def drop_temp_tables(self):
         tables = self.all(
-            "select table_schema,table_name,table_type from information_schema.tables where table_schema = (select nspname from pg_namespace where oid  =  pg_my_temp_schema());"
+            """SELECT pg_namespace.nspname, pg_class.relname,pg_class.relkind
+                             FROM pg_catalog.pg_class
+                             LEFT JOIN pg_catalog.pg_namespace
+                             ON pg_namespace.oid = pg_class.relnamespace
+                             WHERE pg_class.relnamespace = pg_my_temp_schema()"""
         )
 
         for tbl in tables:
-            if tbl["table_type"] == "VIEW":
-                self.execute("DROP VIEW %s.%s CASCADE;" % (tbl["table_schema"], tbl["table_name"]))
-            else:
-                self.execute("DROP TABLE %s.%s CASCADE;" % (tbl["table_schema"], tbl["table_name"]))
+            if tbl["relkind"] == "v":
+                self.execute(
+                    "DROP VIEW IF EXISTS %s.%s CASCADE;"
+                    % (tbl["nspname"], tbl["relname"])
+                )
+            elif tbl["relkind"] == "r":
+                self.execute(
+                    "DROP TABLE IF EXISTS %s.%s CASCADE;"
+                    % (tbl["nspname"], tbl["relname"])
+                )
 
         # TODO: sequence
